@@ -146,6 +146,8 @@ def plain_query(query,words,indices):
         x = indices[index][0]
         print(x)
     elif len(searchTerm) > 1:
+        for i in range(len(searchTerm)):
+            searchTerm[i] = searchTerm[i].lower()
         terms = cleanupText(' '.join(searchTerm))
         for searchTerm in terms:
             index = binarySearch(words,searchTerm)
@@ -160,23 +162,27 @@ def plain_query(query,words,indices):
 
 
 def main():
-    query = sys.argv[2]
+    queries = sys.argv[2:]
     words = []
     indices = []
     print("Loading Files")
-    with open(os.path.join(sys.argv[1],'index0.txt'),'r') as file:
-        for line in file:
-            try:
-                words.append(line.split(None,1)[0])
-                indices.append(line.split(None,1)[1:])
-            except IndexError:
-                pass
+    with open(os.path.join(sys.argv[1],'index.txt'),'r') as file:
+        l = file.readlines()
+    
+    for i in l:
+        try:
+            words.append(i.split(None,1)[0])
+            indices.append(i.split(None,1)[1:])
+        except IndexError:
+            pass
     print('Querying Started')
     print('\n\n\n')
-    if re.match('[b|i|t|c|r|l]:',query):
-        field_query(query,words,indices)
-    else:
-        plain_query(query,words,indices)
+    for query in queries:
+        print('Query :\t'+query)
+        if re.match('[b|i|t|c|r|l]:',query):
+            field_query(query,words,indices)
+        else:
+            plain_query(query,words,indices)
 
 if __name__ == '__main__':
     main()    

@@ -1,0 +1,3 @@
+index Size - 12GB
+number of files in which index is split - 983
+number of tokens - 113679443

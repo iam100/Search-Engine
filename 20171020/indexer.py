@@ -2,8 +2,6 @@
 # coding: utf-8
 
 # In[1]:
-
-
 from Stemmer import Stemmer
 from collections import defaultdict as ddic
 from nltk.corpus import stopwords
@@ -12,6 +10,10 @@ import re
 import os
 import sys
 import nltk
+import heapq
+import threading
+from tqdm import tqdm
+import glob
 
 nltk.download('stopwords')
 nltk.download('punkt')
@@ -36,9 +38,183 @@ stemmer = Stemmer('english')
 
 # filename = '../enwiki-20200801-pages-articles-multistream1.xml-p1p30303'
 # sergey = '../Sergey_brin.xml'
+class writeFinalIndex():
+    def __init__(self, data, finalCount, offsetSize):
+        self.data = data
+        self.finalCount = finalCount
+        self.offsetSize = offsetSize
+
+        self.distinctWords = []
+        self.offset = []
+        keys = ['t', 'b', 'i', 'l', 'c', 'r']
+        self.keys = keys
+        self.maindict = {'t':ddic(dict),'b':ddic(dict),'i':ddic(dict),'l':ddic(dict),'c':ddic(dict),'r':ddic(dict)}
+
+        self.datadict = {'t':[],'b':[],'i':[],'l':[],'c':[],'r':[]}
+
+        self.offsetdict = {'t':[],'b':[],'i':[],'l':[],'c':[],'r':[]}
+
+        self.prevdict = {'t':0,'b':0,'i':0,'l':0,'c':0,'r':0}
+
+    def findOffset(self):
+        for key in sorted(self.data.keys()):
+            docs = self.data[key]
+            temp = []
+            len_docs = len(docs)
+            for i in range(0, len_docs):
+                posting = docs[i]
+                exp = str(r'.*D([0-9]*).*')
+                docID = re.sub(exp, r'\1', posting)
+                exp = str(r'.*t([0-9]*).*')
+                temp = re.sub(exp, r'\1', posting)
+                if temp != posting:
+                    # print('t')
+                    self.maindict['t'][key][docID] = float(temp)
+
+                temp = re.sub(r'.*b([0-9]*).*', r'\1', posting)
+                if temp != posting:
+                    # print('b')
+                    self.maindict['b'][key][docID] = float(temp)
+
+                temp = re.sub(r'.*i([0-9]*).*', r'\1', posting)
+                if temp != posting:
+                    # print('i')
+                    self.maindict['i'][key][docID] = float(temp)
+
+                temp = re.sub(r'.*c([0-9]*).*', r'\1', posting)
+                if temp != posting:
+                    # print('c')
+                    self.maindict['c'][key][docID] = float(temp)
+
+                temp = re.sub(r'.*l([0-9]*).*', r'\1', posting)
+                if temp != posting:
+                    # print('l')
+                    self.maindict['l'][key][docID] = float(temp)
+
+                temp = re.sub(r'.*r([0-9]*).*', r'\1', posting)
+                if temp != posting:
+                    # print('r')
+                    self.maindict['r'][key][docID] = float(temp)
+            string = key + ' ' + str(self.finalCount) + ' ' + str(len(docs))
+            self.distinctWords.append(string)
+            self.offset.append(str(self.offsetSize))
+            self.offsetSize += len(string) + 1
+
+    def appendData(self):
+        for key in tqdm(sorted(self.data.keys())):
+            for inkey in self.keys:
+                if key in self.maindict[inkey]:
+                    # print(key)
+                    string = key + ' '
+                    docs = self.maindict[inkey][key]
+                    docs = sorted(docs, key=docs.get, reverse=True)
+                    for doc in docs:
+                        string +=  doc + ' ' + str(self.maindict[inkey][key][doc]) + ' '
+                    self.offsetdict[inkey].append(
+                        str(self.prevdict[inkey]) + ' ' + str(len(docs)))
+                    self.prevdict[inkey] += len(string) + 1
+                    self.datadict[inkey].append(string)
+
+    def writeAll(self):
+        for inkey in self.keys:
+            # print(self.datadict[inkey])
+            fname = './inverted_index/' + inkey + str(self.finalCount) + '.txt'
+            with open(fname, 'w') as f:
+                f.write('\n'.join(self.datadict[inkey]))
+
+        for inkey in self.keys:
+            fname = './inverted_index/offset_' + inkey + str(self.finalCount) + '.txt'
+            with open(fname, 'w') as f:
+                f.write('\n'.join(self.offsetdict[inkey]))
+
+        with open('./inverted_index/vocabulary.txt', 'a') as f:
+            f.write('\n'.join(self.distinctWords))
+            f.write('\n')
+
+        with open('./inverted_index/offset.txt', 'a') as f:
+            f.write('\n'.join(self.offset))
+            f.write('\n')
+
+    def returnFinal(self):
+        print(self.finalCount)
+        return (self.finalCount+1, self.offsetSize)
 
 
-# In[4]:
+def indexMerge(filecount):
+    data = ddic(list)
+    words = {}
+    files = {}
+    top = {}
+    flag = [0] * filecount
+    finalcount = 0
+    offsetSize = 0
+    heap = []
+    zero = 0
+
+    for i in range(filecount):
+        filename = 'inverted_index/index' + str(i) + '.txt'
+        files[i] = open(filename, 'r')
+        flag[i] = True
+        top[i] = files[i].readline()
+        top[i] = top[i].strip()
+        words[i] = top[i].split()
+
+        if words[i][zero] not in heap:
+            heapq.heappush(heap, words[i][zero])
+    count = zero
+    while(any(flag) == 1):
+        temp = heapq.heappop(heap)
+        count += 1
+        # print(count)
+
+        if(count % 100000 == zero):
+            oldFilecount = finalcount
+            finalIndexClass = writeFinalIndex(data, finalcount, offsetSize)
+            finalIndexClass.findOffset()
+            finalIndexClass.appendData()
+            finalIndexClass.writeAll()
+            finalcount, offsetSize = finalIndexClass.returnFinal()
+
+            if oldFilecount != finalcount:
+                data = ddic(list)
+
+        for i in range(0, filecount):
+            if flag[i] == 1:
+                if words[i][zero] == temp:
+                    data[temp].extend(words[i][1:])
+                    top[i] = files[i].readline()
+                    top[i] = top[i].strip()
+                    if top[i] == '':
+                        flag[i] = zero
+                        files[i].close()
+                    else:
+                        words[i] = top[i].split()
+                        if words[i][zero] not in heap:
+                            heapq.heappush(heap, words[i][zero])
+    finalIndexClass = writeFinalIndex(data, finalcount, offsetSize)
+    finalIndexClass.findOffset()
+    finalIndexClass.appendData()
+    finalIndexClass.writeAll()
+    finalcount, offsetSize = finalIndexClass.returnFinal()
+
+def cleanupText(stats):
+    global stop_words
+    global stemmer
+    global tokens_total
+
+    stats = stats.encode("ascii", errors="ignore").decode()
+    exp = str(r'http[^\ ]*\ ')
+    stats = re.sub(exp, r' ', stats)
+    exp = str(r'&nbsp;|&lt;|&gt;|&amp;|&quot;|&apos;')
+    stats = re.sub(exp, r' ', stats)
+    stats = re.sub(
+        r'\—|\%|\$|\'|\||\.|\*|\[|\]|\:|\;|\,|\{|\}|\(|\)|\=|\+|\-|\_|\#|\!|\`|\"|\?|\/|\>|\<|\&|\\|\u2013|\n',
+        r' ', stats)
+    stats = stats.split()
+    tokens_total += len(stats)
+    stats = [i for i in stats if not i in stop_words]
+    stats = stemmer.stemWords(stats)
+    return stats
 
 
 def writeFile(pageno, imap, fileno, titleoffset):
@@ -49,6 +225,7 @@ def writeFile(pageno, imap, fileno, titleoffset):
     global tokens_total
 
     inv_ind_total = 0
+    prevoff = titleoffset
 
     stats = []
     for k in sorted(imap):
@@ -57,7 +234,10 @@ def writeFile(pageno, imap, fileno, titleoffset):
         inv_ind_total += len(fi)
         initial += ' '.join(fi)
         stats.append(initial)
-    fname = os.path.join(inverted_index_dir, 'index.txt')
+
+    filename = 'index' + str(fileno) + '.txt'
+
+    fname = os.path.join(inverted_index_dir, filename)
     with open(fname, 'w') as f:
         f.write('\n'.join(stats))
     inv_ind_total -= len(imap)
@@ -67,25 +247,31 @@ def writeFile(pageno, imap, fileno, titleoffset):
         f.write(str(tokens_total)+'\n')
         f.write(str(inv_ind_total))
 
+    stats = []
+    statOffset = []
+
+    for k in sorted(titleID):
+        initial = str(k) + ' ' + titleID[k].strip()
+        stats.append(initial)
+        statOffset.append(str(prevoff))
+        prevoff += len(initial) + 1
+
+    with open('./inverted_index/title.txt', 'a') as f:
+        var = '\n'.join(stats)
+        f.write(var)
+        f.write('\n')
+
+    with open('./inverted_index/titleOffset.txt', 'a') as f:
+        var = '\n'.join(statOffset)
+        f.write(var)
+        f.write('\n')
+
+    return prevoff
+
 
 # In[5]:
 
 
-def cleanupText(stats):
-    global stop_words
-    global stemmer
-    global tokens_total
-
-    stats = stats.encode("ascii", errors="ignore").decode()
-    stats = re.sub(r'http[^\ ]*\ ', r' ', stats)
-    stats = re.sub(r'&nbsp;|&lt;|&gt;|&amp;|&quot;|&apos;', r' ', stats)
-    stats = re.sub(
-        r'\`|\~|\!|\@|\#|\"|\'|\$|\%|\^|\&|\*|\(|\)|\-|\_|\=|\+|\\|\||\]|\[|\}|\{|\;|\:|\/|\?|\.|\>|\,|\<|\'|\n|\||\|\/"', r' ', stats)
-    stats = stats.split()
-    tokens_total += len(stats)
-    stats = [i for i in stats if not i in stop_words]
-    stats = stemmer.stemWords(stats)
-    return stats
 
 
 # In[6]:
@@ -96,6 +282,8 @@ class Index():
         self.title = title
         self.refs = refs
         self.extlink = extlink
+        self.prevOff = 0
+        self.nextOff = []
         self.cat = cat
         self.body = body
         self.info = info
@@ -134,7 +322,8 @@ class Index():
             total[self.info[i]] += 1
         return (total, refs, extlink, cat, body, info, title)
 
-    def IndexMapping(self, total, refs, extlink, cat, body, info, title, pageno, iMap):
+    def IndexMapping(
+            self, total, refs, extlink, cat, body, info, title, pageno, iMap):
 
         for word in total.keys():
             initial = 'D' + str(pageno)
@@ -176,7 +365,7 @@ class RegexExp():
         extlinks = []
         cat = []
         for l in stats:
-            if re.search(r'ref', l):
+            if re.search(r'<ref', l):
                 x = re.sub(r'.*title[\ ]*=[\ ]*([^\|]*).*', r'\1', l)
                 refs.append(x)
             if re.search(r'\[\[category', l):
@@ -195,7 +384,7 @@ class RegexExp():
         for l in stats:
             if re.match(r'\{\{infobox', l):
                 flag = 1
-                x = re.sub('\{\{infobox(.*)', r'\1', l)
+                x = re.sub(r'\{\{infobox(.*)', r'\1', l)
                 i.append(x)
             elif flag == 1:
                 if l == '}}':
@@ -209,10 +398,11 @@ class RegexExp():
     def textHandling(self, ID, text, title):
         text = text.lower()
         cleaned_text = text.split('==references==')
+        one = 1
 #         print(data)
-        if len(cleaned_text) == 1:
+        if len(cleaned_text) == one:
             cleaned_text = text.split('== references== ')
-        if len(cleaned_text) == 1:
+        if len(cleaned_text) == one:
             refs = []
             extlink = []
             cat = []
@@ -258,16 +448,22 @@ class XMLHandler(xml.sax.ContentHandler):
 #             print(self.text)
 
         if tag == 'page':
-            self.pageNo += 1
             reg = RegexExp()
+            global fileNo, pageNo, iMap, offset, titleID
             refs, extlink, cat, body, info, title = reg.textHandling(
                 self.ID, self.text, self.title)
             indexer = Index(refs, extlink, cat, body, info, title)
             self.iMap, self.pageNo = indexer.InitIndex(self.pageNo, self.iMap)
-
-            global fileNo, pageNo, iMap, offset, titleID
             titleID[self.pageNo] = self.title.strip().encode(
                 "ascii", errors="ignore").decode()
+            self.pageNo += 1
+            if self.pageNo % 10000 == 0:
+                offset = writeFile(self.pageNo, self.iMap, self.fileNo, offset)
+                self.iMap = ddic(list)
+                titleID = {}
+                self.fileNo += 1
+
+            global fileNo
 
             fileNo = self.fileNo
             pageNo = self.pageNo
@@ -281,34 +477,35 @@ class XMLHandler(xml.sax.ContentHandler):
 
     def characters(self, content):
         if self.CurrentData == 'title':
-            self.title += content
+            self.title = self.title + content
         elif self.CurrentData == 'text':
-            self.text += content
+            self.text = self.text + content
         elif self.CurrentData == 'id' and self.flag == 0:
             self.ID = content
             self.flag = 1
 
 
-# In[9]:
-
-
-
-
 # In[10]:
 
 if __name__ == '__main__':
-    wiki_dump = sys.argv[1]
+    wiki_dump = "IRE/"
     global inverted_index_dir, invertedindex_stat
+    # global fileNo
 
-    inverted_index_dir = sys.argv[2]
-    invertedindex_stat = sys.argv[3]
+    filenames = glob.glob(wiki_dump + '*')
+
+    inverted_index_dir = "./inverted_index"
+    invertedindex_stat = "inverted_index_stat"
 
     parser = xml.sax.make_parser()
     parser.setFeature(xml.sax.handler.feature_namespaces, 0)
     handler = XMLHandler()
     parser.setContentHandler(handler)
-    parser.parse(wiki_dump)
+    for fname in filenames:
+        parser.parse(fname)
 
-    
-
+    with open("./inverted_index/fileNumbers.txt","w") as f:
+        f.write(str(handler.pageNo))
     writeFile(pageNo, iMap, fileNo, offset)
+    fileNo += 1
+    indexMerge(fileNo)
